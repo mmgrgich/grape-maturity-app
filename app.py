@@ -22,6 +22,24 @@ if uploaded_files:
     all_data = []
     for i, file in enumerate(uploaded_files):
         year = file.name.split(" - ")[-1].replace(".xlsx", "")
+        # --- NEW: Read top rows for date search ---
+        try:
+            xl_preview = pd.read_excel(file, sheet_name='Sheet1', header=None, nrows=10)
+        except Exception as e:
+            st.error(f"Error reading preview from '{file.name}': {e}")
+            continue
+        found_date = None
+        for row in xl_preview.itertuples(index=False):
+            for cell in row:
+                if isinstance(cell, str) and 'date' in cell.lower():
+                    match = re.search(r'(\d{1,2}/\d{1,2}/\d{2,4})', cell)
+                    if match:
+                        found_date = match.group(1)
+                        break
+            if found_date:
+                break
+
+        # --- Now read the actual data as before ---
         try:
             df_raw = pd.read_excel(file, sheet_name='Sheet1', header=7)
         except Exception as e:
@@ -31,10 +49,8 @@ if uploaded_files:
         df_raw.columns = df_raw.iloc[0].astype(str).str.strip()
         df = df_raw[1:].copy()
         df.columns = df.columns.str.strip()
-        # Ensure every Block is tied to the Vineyard in the cell to the left
         if 'Vineyard' in df.columns and 'Block' in df.columns:
             df['Vineyard'] = df['Vineyard'].ffill()
-        # Check for duplicate columns and skip files that have them
         if df.columns.duplicated().any():
             st.error(
                 f"Duplicate columns found in file {file.name}: "
@@ -43,54 +59,41 @@ if uploaded_files:
             )
             continue
         df['Vintage'] = year
-        # --- Date Handling ---
+
+        # --- Date assignment (now using found_date from preview read) ---
         if 'Date' in df.columns:
-            # Try parsing with explicit format for MM/DD/YY (e.g. 8/30/24)
             df['Date'] = pd.to_datetime(df['Date'], format='%m/%d/%y', errors='coerce')
-            # Fallback: try general parsing for any not caught above
             df['Date'] = df['Date'].fillna(pd.to_datetime(df['Date'], errors='coerce'))
+        elif found_date:
+            parsed_date = pd.to_datetime(found_date, format='%m/%d/%y', errors='coerce')
+            if pd.isnull(parsed_date):
+                parsed_date = pd.to_datetime(found_date, errors='coerce')
+            df['Date'] = parsed_date
+            st.success(f"Applied date {parsed_date.strftime('%Y-%m-%d')} to all rows in {file.name}")
         else:
-            # Try to extract date from the top rows of the original sheet
-            found_date = None
-            for cell in df_raw.head(10).values.flatten():
-                if isinstance(cell, str) and 'date' in cell.lower():
-                    # Try to extract a date with regex
-                    match = re.search(r'(\d{1,2}/\d{1,2}/\d{2,4})', cell)
-                    if match:
-                        found_date = match.group(1)
-                        break
-            if found_date:
-                parsed_date = pd.to_datetime(found_date, format='%m/%d/%y', errors='coerce')
-                if pd.isnull(parsed_date):
-                    parsed_date = pd.to_datetime(found_date, errors='coerce') # fallback
-                df['Date'] = parsed_date
-                st.success(f"Applied date {parsed_date.strftime('%Y-%m-%d')} to all rows in {file.name}")
-            else:
-                st.warning(
-                    f"File '{file.name}' is missing a 'Date' column and no date was found above the table. "
-                    f"Please enter the correct collection date for this file below or update your Excel format.",
-                    icon="⚠️"
-                )
-                date_input = st.sidebar.date_input(
-                    f"Collection date for {year} ({file.name}) [REQUIRED]",
-                    value=None,
-                    key=f"date_input_{i}_{file.name}"
-                )
-                if date_input is None:
-                    st.stop()
-                df['Date'] = pd.to_datetime(date_input)
+            st.warning(
+                f"File '{file.name}' is missing a 'Date' column and no date was found above the table. "
+                f"Please enter the correct collection date for this file below or update your Excel format.",
+                icon="⚠️"
+            )
+            date_input = st.sidebar.date_input(
+                f"Collection date for {year} ({file.name}) [REQUIRED]",
+                value=None,
+                key=f"date_input_{i}_{file.name}"
+            )
+            if date_input is None:
+                st.stop()
+            df['Date'] = pd.to_datetime(date_input)
         all_data.append(df)
     if not all_data:
         st.error("No valid data could be loaded from the uploaded files.")
     else:
         df_all = pd.concat(all_data, ignore_index=True)
         df_all.columns = df_all.columns.str.strip()
-        # Ensure metrics are numeric
         for col in ['Brix', 'pH', 'TA', 'MA']:
             if col in df_all.columns:
                 df_all[col] = pd.to_numeric(df_all[col], errors='coerce')
 
-        # --- FILTERING & FLIPPING FUNCTIONALITY ---
         st.sidebar.header("Vineyard and Block Navigation")
         if 'Vineyard' not in df_all.columns or 'Block' not in df_all.columns:
             st.error("Missing required columns: 'Vineyard' and/or 'Block'. Check your Excel file headers.")
@@ -100,7 +103,6 @@ if uploaded_files:
         vineyard = st.sidebar.selectbox("Vineyard", vineyards, key="vineyard_select")
         blocks = sorted(df_all[df_all['Vineyard'].astype(str) == vineyard]['Block'].dropna().astype(str).unique())
         block = st.sidebar.selectbox("Block", blocks, key="block_select")
-        # Flip-through feature: Prev/Next buttons for Vineyard/Block
         v_idx = vineyards.index(vineyard)
         b_idx = blocks.index(block)
         col1, col2, col3, col4 = st.sidebar.columns([1,1,1,1])
@@ -120,13 +122,11 @@ if uploaded_files:
         available_metrics = [col for col in ['Brix', 'pH', 'TA', 'MA'] if col in df_all.columns]
         metric = st.sidebar.selectbox("Metric", available_metrics)
 
-        # --- FILTERED DATA ---
         filtered = df_all[
             (df_all['Vineyard'].astype(str) == vineyard) &
             (df_all['Block'].astype(str) == block)
         ].copy()
 
-        # ---- 1. PREDICTION: Only current calendar year ----
         st.subheader(f"Prediction for {vineyard} Block {block} in {datetime.datetime.now().year}")
         current_year = datetime.datetime.now().year
         filtered_pred = filtered[
@@ -165,7 +165,6 @@ if uploaded_files:
         else:
             st.warning("Not enough data points for prediction for the current year.")
 
-        # ---- 2. AGGREGATE PLOTS: All vintages for this block/vineyard ----
         st.subheader(f"All Vintages: {vineyard} Block {block} ({metric})")
         fig, ax = plt.subplots(figsize=(9,5))
         for vtg in sorted(filtered['Vintage'].dropna().unique()):
@@ -178,7 +177,6 @@ if uploaded_files:
         ax.legend(title="Vintage", loc="best", fontsize='small')
         st.pyplot(fig)
 
-        # ---- 3. SUMMARY (by Vineyard and Block, all years) ----
         st.subheader("Summary (by Vineyard and Block, all vintages)")
         summary_cols = [col for col in ['Brix', 'pH', 'TA', 'MA'] if col in filtered.columns]
         if summary_cols:
