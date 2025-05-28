@@ -1,16 +1,3 @@
-import subprocess
-import sys
-
-# List of required packages
-packages = [
-    "streamlit",
-    "pandas",
-    "numpy",
-    "matplotlib",
-    "openpyxl",
-    "scikit-learn"
-]
-
 # Install each package
 for package in packages:
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
