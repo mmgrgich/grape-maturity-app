@@ -276,7 +276,7 @@ if uploaded_files:
         else:
             st.warning("Not enough data points for prediction for the current year.")
 
-        # ---- 2. AGGREGATE PLOTS: All vintages for this block/vineyard/variety (month-only x axis) ----
+        # ---- 2. AGGREGATE PLOTS: All vintages for this block/vineyard/variety (month-only x axis, with linear regression) ----
         st.subheader(f"All Vintages: {st.session_state['vineyard_select']} Block {st.session_state['block_select']}{title_variety} ({metric})")
 
         fig, ax = plt.subplots(figsize=(9,5))
@@ -297,6 +297,14 @@ if uploaded_files:
             if not grp.empty:
                 grp = grp.sort_values('PlotDate')
                 ax.plot(grp['PlotDate'], grp[metric], marker='o', label=str(vtg), color=colors(idx))
+                # Linear regression on the numeric date axis
+                X = mdates.date2num(grp['PlotDate']).reshape(-1, 1)
+                y = grp[metric].values
+                if len(X) > 1:
+                    model = LinearRegression().fit(X, y)
+                    x_fit = np.linspace(X.min(), X.max(), 100).reshape(-1,1)
+                    y_fit = model.predict(x_fit)
+                    ax.plot(mdates.num2date(x_fit.flatten()), y_fit, color=colors(idx), linestyle='--', alpha=0.7)
 
         # X-axis: June–December of dummy year
         x_start = pd.Timestamp(f"{dummy_year}-06-01")
