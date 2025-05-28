@@ -42,9 +42,15 @@ if uploaded_files:
             )
             continue
         df['Vintage'] = year
-        # Date handling with unique key per file (using enumerate index)
+        # Date handling with robust parsing
         if 'Date' in df.columns:
-            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+            # Try parsing with explicit format for MM/DD/YY (e.g. 8/30/24)
+            df['Date'] = pd.to_datetime(df['Date'], format='%m/%d/%y', errors='coerce')
+            # Fallback: try general parsing for any not caught above
+            df['Date'] = df['Date'].fillna(pd.to_datetime(df['Date'], errors='coerce'))
+            # Debug output (remove or comment out if not needed)
+            st.write(f"Parsed dates for {file.name}:", df['Date'].head())
+            st.write(f"Unique years in Date column for {file.name}:", df['Date'].dt.year.unique())
         else:
             st.warning(
                 f"File '{file.name}' is missing a 'Date' column. "
