@@ -276,7 +276,7 @@ if uploaded_files:
         else:
             st.warning("Not enough data points for prediction for the current year.")
 
-        # ---- 2. AGGREGATE PLOTS: All vintages for this block/vineyard/variety (only June-Dec) ----
+        # ---- 2. AGGREGATE PLOTS: All vintages for this block/vineyard/variety (month-only x axis) ----
         st.subheader(f"All Vintages: {st.session_state['vineyard_select']} Block {st.session_state['block_select']}{title_variety} ({metric})")
 
         fig, ax = plt.subplots(figsize=(9,5))
@@ -285,20 +285,22 @@ if uploaded_files:
         mask_grow = filtered['Date'].dt.month.between(6,12)
         filtered_grow = filtered[mask_grow].copy()
 
+        # Convert all dates to "dummy year" (e.g., 2000) for overlay
+        dummy_year = 2000
+        filtered_grow['PlotDate'] = filtered_grow['Date'].apply(lambda d: d.replace(year=dummy_year))
+
         vintages = sorted(filtered_grow['Vintage'].dropna().unique())
         colors = plt.cm.get_cmap('tab10', len(vintages))
 
         for idx, vtg in enumerate(vintages):
-            grp = filtered_grow[filtered_grow['Vintage'] == vtg].dropna(subset=['Date', metric])
+            grp = filtered_grow[filtered_grow['Vintage'] == vtg].dropna(subset=['PlotDate', metric])
             if not grp.empty:
-                # Normalize x-axis to always show June 1 - Dec 31
-                grp = grp.sort_values('Date')
-                ax.plot(grp['Date'], grp[metric], marker='o', label=str(vtg), color=colors(idx))
+                grp = grp.sort_values('PlotDate')
+                ax.plot(grp['PlotDate'], grp[metric], marker='o', label=str(vtg), color=colors(idx))
 
-        # Set x-axis limits and formatting
-        year_for_axis = 2024
-        x_start = pd.Timestamp(f"{year_for_axis}-06-01")
-        x_end = pd.Timestamp(f"{year_for_axis}-12-31")
+        # X-axis: June–December of dummy year
+        x_start = pd.Timestamp(f"{dummy_year}-06-01")
+        x_end = pd.Timestamp(f"{dummy_year}-12-31")
         ax.set_xlim(x_start, x_end)
         ax.xaxis.set_major_locator(mdates.MonthLocator())
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
