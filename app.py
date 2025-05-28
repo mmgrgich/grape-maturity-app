@@ -30,6 +30,9 @@ if uploaded_files:
         df_raw.columns = df_raw.iloc[0].astype(str).str.strip()
         df = df_raw[1:].copy()
         df.columns = df.columns.str.strip()
+        # Ensure every Block is tied to the Vineyard in the cell to the left
+        if 'Vineyard' in df.columns and 'Block' in df.columns:
+            df['Vineyard'] = df['Vineyard'].ffill()
         # Check for duplicate columns and skip files that have them
         if df.columns.duplicated().any():
             st.error(
