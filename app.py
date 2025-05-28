@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import datetime
+import re
 from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
 
@@ -42,30 +43,42 @@ if uploaded_files:
             )
             continue
         df['Vintage'] = year
-        # Date handling with robust parsing
+        # --- Date Handling ---
         if 'Date' in df.columns:
             # Try parsing with explicit format for MM/DD/YY (e.g. 8/30/24)
             df['Date'] = pd.to_datetime(df['Date'], format='%m/%d/%y', errors='coerce')
             # Fallback: try general parsing for any not caught above
             df['Date'] = df['Date'].fillna(pd.to_datetime(df['Date'], errors='coerce'))
-            # Debug output (remove or comment out if not needed)
-            st.write(f"Parsed dates for {file.name}:", df['Date'].head())
-            st.write(f"Unique years in Date column for {file.name}:", df['Date'].dt.year.unique())
         else:
-            st.warning(
-                f"File '{file.name}' is missing a 'Date' column. "
-                f"Please enter the correct collection date for this file below. "
-                f"Incorrect dates may result in prediction errors.",
-                icon="⚠️"
-            )
-            date_input = st.sidebar.date_input(
-                f"Collection date for {year} ({file.name}) [REQUIRED]",
-                value=None,
-                key=f"date_input_{i}_{file.name}"
-            )
-            if date_input is None:
-                st.stop()  # Force user to pick a date
-            df['Date'] = pd.to_datetime(date_input)
+            # Try to extract date from the top rows of the original sheet
+            found_date = None
+            for cell in df_raw.head(10).values.flatten():
+                if isinstance(cell, str) and 'date' in cell.lower():
+                    # Try to extract a date with regex
+                    match = re.search(r'(\d{1,2}/\d{1,2}/\d{2,4})', cell)
+                    if match:
+                        found_date = match.group(1)
+                        break
+            if found_date:
+                parsed_date = pd.to_datetime(found_date, format='%m/%d/%y', errors='coerce')
+                if pd.isnull(parsed_date):
+                    parsed_date = pd.to_datetime(found_date, errors='coerce') # fallback
+                df['Date'] = parsed_date
+                st.success(f"Applied date {parsed_date.strftime('%Y-%m-%d')} to all rows in {file.name}")
+            else:
+                st.warning(
+                    f"File '{file.name}' is missing a 'Date' column and no date was found above the table. "
+                    f"Please enter the correct collection date for this file below or update your Excel format.",
+                    icon="⚠️"
+                )
+                date_input = st.sidebar.date_input(
+                    f"Collection date for {year} ({file.name}) [REQUIRED]",
+                    value=None,
+                    key=f"date_input_{i}_{file.name}"
+                )
+                if date_input is None:
+                    st.stop()
+                df['Date'] = pd.to_datetime(date_input)
         all_data.append(df)
     if not all_data:
         st.error("No valid data could be loaded from the uploaded files.")
