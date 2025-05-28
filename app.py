@@ -47,13 +47,11 @@ if uploaded_files:
             df['Date'] = pd.to_datetime(df['Date'], format='%m/%d/%y', errors='coerce')
             df['Date'] = df['Date'].fillna(pd.to_datetime(df['Date'], errors='coerce'))
         else:
-            # Extract date from filename of format M-D-YY.xlsx
             filename = file.name
             match = re.search(r'(\d{1,2})-(\d{1,2})-(\d{2})(?:\.xlsx)?$', filename)
             parsed_date = None
             if match:
                 month, day, year2 = match.groups()
-                # Assume 2000-2099 for 2-digit years
                 year4 = int(year2)
                 year4 += 2000 if year4 < 100 else 0
                 date_str = f"{month}/{day}/{year4}"
@@ -89,19 +87,16 @@ if uploaded_files:
         # --- FILTERING & FLIP-THROUGH FUNCTIONALITY (Now with Variety) ---
         st.sidebar.header("Vineyard, Block, and Variety Navigation")
 
-        # Vineyard selection
         vineyards = sorted(df_all['Vineyard'].dropna().astype(str).unique())
         if "vineyard_select" not in st.session_state:
             st.session_state["vineyard_select"] = vineyards[0]
         vineyard = st.session_state["vineyard_select"]
 
-        # Block selection
         blocks = sorted(df_all[df_all['Vineyard'].astype(str) == vineyard]['Block'].dropna().astype(str).unique())
         if "block_select" not in st.session_state or st.session_state["block_select"] not in blocks:
             st.session_state["block_select"] = blocks[0]
         block = st.session_state["block_select"]
 
-        # Variety selection
         if 'Variety' in df_all.columns:
             varieties = sorted(df_all[
                 (df_all['Vineyard'].astype(str) == vineyard) &
@@ -116,7 +111,6 @@ if uploaded_files:
             varieties = ['']
             variety = ''
 
-        # Sidebar selectboxes, always tied to session state
         vineyard = st.sidebar.selectbox("Vineyard", vineyards, index=vineyards.index(vineyard), key="vineyard_select")
         blocks = sorted(df_all[df_all['Vineyard'].astype(str) == vineyard]['Block'].dropna().astype(str).unique())
         block = st.sidebar.selectbox("Block", blocks, index=blocks.index(block) if block in blocks else 0, key="block_select")
@@ -131,12 +125,10 @@ if uploaded_files:
         else:
             variety = ''
 
-        # When vineyard/block/variety is changed, reset lower levels
         if vineyard != st.session_state["vineyard_select"]:
             st.session_state["vineyard_select"] = vineyard
             new_blocks = sorted(df_all[df_all['Vineyard'].astype(str) == vineyard]['Block'].dropna().astype(str).unique())
             st.session_state["block_select"] = new_blocks[0] if new_blocks else None
-            # Reset variety for new block
             if 'Variety' in df_all.columns:
                 new_varieties = sorted(df_all[
                     (df_all['Vineyard'].astype(str) == vineyard) &
@@ -154,7 +146,6 @@ if uploaded_files:
         if 'Variety' in df_all.columns and variety != st.session_state["variety_select"]:
             st.session_state["variety_select"] = variety
 
-        # Navigation buttons (Vineyard/Block/Variety)
         v_idx = vineyards.index(st.session_state["vineyard_select"])
         blocks = sorted(df_all[df_all['Vineyard'].astype(str) == st.session_state["vineyard_select"]]['Block'].dropna().astype(str).unique())
         b_idx = blocks.index(st.session_state["block_select"]) if st.session_state["block_select"] in blocks else 0
@@ -224,11 +215,9 @@ if uploaded_files:
                     if var_idx < len(varieties) - 1:
                         st.session_state["variety_select"] = varieties[var_idx + 1]
 
-        # --- Metric selection ---
         available_metrics = [col for col in ['Brix', 'pH', 'TA', 'MA'] if col in df_all.columns]
         metric = st.sidebar.selectbox("Metric", available_metrics)
 
-        # --- FILTERED DATA ---
         filtered = df_all[
             (df_all['Vineyard'].astype(str) == st.session_state["vineyard_select"]) &
             (df_all['Block'].astype(str) == st.session_state["block_select"])
@@ -281,11 +270,9 @@ if uploaded_files:
 
         fig, ax = plt.subplots(figsize=(9,5))
 
-        # Filter for only June 1 to December 31 for any year
         mask_grow = filtered['Date'].dt.month.between(6,12)
         filtered_grow = filtered[mask_grow].copy()
 
-        # Convert all dates to "dummy year" (e.g., 2000) for overlay
         dummy_year = 2000
         filtered_grow['PlotDate'] = filtered_grow['Date'].apply(lambda d: d.replace(year=dummy_year))
 
@@ -297,7 +284,6 @@ if uploaded_files:
             if not grp.empty:
                 grp = grp.sort_values('PlotDate')
                 ax.plot(grp['PlotDate'], grp[metric], marker='o', label=str(vtg), color=colors(idx))
-                # Linear regression on the numeric date axis
                 X = mdates.date2num(grp['PlotDate']).reshape(-1, 1)
                 y = grp[metric].values
                 if len(X) > 1:
@@ -306,7 +292,6 @@ if uploaded_files:
                     y_fit = model.predict(x_fit)
                     ax.plot(mdates.num2date(x_fit.flatten()), y_fit, color=colors(idx), linestyle='--', alpha=0.7)
 
-        # X-axis: June–December of dummy year
         x_start = pd.Timestamp(f"{dummy_year}-06-01")
         x_end = pd.Timestamp(f"{dummy_year}-12-31")
         ax.set_xlim(x_start, x_end)
@@ -320,7 +305,7 @@ if uploaded_files:
         plt.tight_layout()
         st.pyplot(fig)
 
-        # ---- 3. SUMMARY (by Vineyard, Block, Variety, all years) ----
+        # ---- 3. SUMMARY (by Vineyard, Block, Variety, all years, with best fit line) ----
         st.subheader("Summary (by Vineyard, Block, Variety, all vintages)")
         summary_cols = [col for col in ['Brix', 'pH', 'TA', 'MA'] if col in filtered.columns]
         group_cols = ['Vineyard', 'Block']
@@ -329,5 +314,23 @@ if uploaded_files:
         if summary_cols:
             summary = filtered.groupby(group_cols)[summary_cols].mean(numeric_only=True).round(2)
             st.dataframe(summary)
+
+            # For the selected metric: plot mean value by vintage and add best-fit line
+            if 'Vintage' in filtered.columns:
+                st.subheader(f"Mean {metric} by Vintage for {st.session_state['vineyard_select']} Block {st.session_state['block_select']}{title_variety}")
+                means = filtered.groupby('Vintage')[metric].mean().dropna()
+                vintages = pd.to_numeric(means.index)
+                values = means.values
+                fig2, ax2 = plt.subplots(figsize=(7,4))
+                ax2.scatter(vintages, values, color='tab:blue', label='Mean')
+                if len(vintages) > 1:
+                    reg = LinearRegression().fit(vintages.values.reshape(-1,1), values)
+                    y_pred = reg.predict(np.array([vintages.min(), vintages.max()]).reshape(-1,1))
+                    ax2.plot([vintages.min(), vintages.max()], y_pred, color='tab:red', linestyle='--', label='Best fit')
+                ax2.set_xlabel("Vintage")
+                ax2.set_ylabel(f"Mean {metric}")
+                ax2.set_title(f"Mean {metric} by Vintage")
+                ax2.legend()
+                st.pyplot(fig2)
         else:
             st.info("No summary metrics available for the selected data.")
