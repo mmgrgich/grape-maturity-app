@@ -22,24 +22,6 @@ if uploaded_files:
     all_data = []
     for i, file in enumerate(uploaded_files):
         year = file.name.split(" - ")[-1].replace(".xlsx", "")
-        # --- NEW: Read top rows for date search ---
-        try:
-            xl_preview = pd.read_excel(file, sheet_name='Sheet1', header=None, nrows=10)
-        except Exception as e:
-            st.error(f"Error reading preview from '{file.name}': {e}")
-            continue
-        found_date = None
-        for row in xl_preview.itertuples(index=False):
-            for cell in row:
-                if isinstance(cell, str) and 'date' in cell.lower():
-                    match = re.search(r'(\d{1,2}/\d{1,2}/\d{2,4})', cell)
-                    if match:
-                        found_date = match.group(1)
-                        break
-            if found_date:
-                break
-
-        # --- Now read the actual data as before ---
         try:
             df_raw = pd.read_excel(file, sheet_name='Sheet1', header=7)
         except Exception as e:
@@ -60,30 +42,39 @@ if uploaded_files:
             continue
         df['Vintage'] = year
 
-        # --- Date assignment (now using found_date from preview read) ---
         if 'Date' in df.columns:
             df['Date'] = pd.to_datetime(df['Date'], format='%m/%d/%y', errors='coerce')
             df['Date'] = df['Date'].fillna(pd.to_datetime(df['Date'], errors='coerce'))
-        elif found_date:
-            parsed_date = pd.to_datetime(found_date, format='%m/%d/%y', errors='coerce')
-            if pd.isnull(parsed_date):
-                parsed_date = pd.to_datetime(found_date, errors='coerce')
-            df['Date'] = parsed_date
-            st.success(f"Applied date {parsed_date.strftime('%Y-%m-%d')} to all rows in {file.name}")
         else:
-            st.warning(
-                f"File '{file.name}' is missing a 'Date' column and no date was found above the table. "
-                f"Please enter the correct collection date for this file below or update your Excel format.",
-                icon="⚠️"
-            )
-            date_input = st.sidebar.date_input(
-                f"Collection date for {year} ({file.name}) [REQUIRED]",
-                value=None,
-                key=f"date_input_{i}_{file.name}"
-            )
-            if date_input is None:
-                st.stop()
-            df['Date'] = pd.to_datetime(date_input)
+            # Extract date from filename of format M-D-YY.xlsx
+            filename = file.name
+            match = re.search(r'(\d{1,2})-(\d{1,2})-(\d{2})(?:\.xlsx)?$', filename)
+            parsed_date = None
+            if match:
+                month, day, year2 = match.groups()
+                # Assume 2000-2099 for 2-digit years
+                year4 = int(year2)
+                year4 += 2000 if year4 < 100 else 0
+                date_str = f"{month}/{day}/{year4}"
+                parsed_date = pd.to_datetime(date_str, format='%m/%d/%Y', errors='coerce')
+            if parsed_date is not None and not pd.isnull(parsed_date):
+                df['Date'] = parsed_date
+                st.success(f"Applied date {parsed_date.strftime('%Y-%m-%d')} from file name to all rows in {file.name}")
+            else:
+                st.warning(
+                    f"File '{file.name}' is missing a 'Date' column and no recognizable date was found in the file name. "
+                    f"Please enter the correct collection date for this file below or update your Excel format.",
+                    icon="⚠️"
+                )
+                date_input = st.sidebar.date_input(
+                    f"Collection date for {year} ({file.name}) [REQUIRED]",
+                    value=None,
+                    key=f"date_input_{i}_{file.name}"
+                )
+                if date_input is None:
+                    st.stop()
+                df['Date'] = pd.to_datetime(date_input)
+
         all_data.append(df)
     if not all_data:
         st.error("No valid data could be loaded from the uploaded files.")
