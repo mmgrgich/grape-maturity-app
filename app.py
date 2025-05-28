@@ -30,6 +30,7 @@ if uploaded_files:
         df_raw.columns = df_raw.iloc[0].astype(str).str.strip()
         df = df_raw[1:].copy()
         df.columns = df.columns.str.strip()
+        # Check for duplicate columns and skip files that have them
         if df.columns.duplicated().any():
             st.error(
                 f"Duplicate columns found in file {file.name}: "
@@ -38,10 +39,14 @@ if uploaded_files:
             )
             continue
         df['Vintage'] = year
+        # Date handling with unique key
         if 'Date' in df.columns:
             df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         else:
-            date_input = st.sidebar.date_input(f"Collection date for {year}")
+            date_input = st.sidebar.date_input(
+                f"Collection date for {year}",
+                key=f"date_input_{year}_{file.name}"
+            )
             df['Date'] = pd.to_datetime(date_input)
         all_data.append(df)
     if not all_data:
@@ -49,20 +54,22 @@ if uploaded_files:
     else:
         df_all = pd.concat(all_data, ignore_index=True)
         df_all.columns = df_all.columns.str.strip()
-        # Ensure these columns exist
+        # Ensure metrics are numeric
         for col in ['Brix', 'pH', 'TA', 'MA']:
             if col in df_all.columns:
                 df_all[col] = pd.to_numeric(df_all[col], errors='coerce')
 
         # --- FILTERING & FLIPPING FUNCTIONALITY ---
         st.sidebar.header("Vineyard and Block Navigation")
+        if 'Vineyard' not in df_all.columns or 'Block' not in df_all.columns:
+            st.error("Missing required columns: 'Vineyard' and/or 'Block'. Check your Excel file headers.")
+            st.write("Columns found:", df_all.columns.tolist())
+            st.stop()
         vineyards = sorted(df_all['Vineyard'].dropna().astype(str).unique())
         vineyard = st.sidebar.selectbox("Vineyard", vineyards, key="vineyard_select")
-
         blocks = sorted(df_all[df_all['Vineyard'].astype(str) == vineyard]['Block'].dropna().astype(str).unique())
         block = st.sidebar.selectbox("Block", blocks, key="block_select")
-
-        # Flip-through feature: "Previous" and "Next" buttons for Vineyard/Block
+        # Flip-through feature: Prev/Next buttons for Vineyard/Block
         v_idx = vineyards.index(vineyard)
         b_idx = blocks.index(block)
         col1, col2, col3, col4 = st.sidebar.columns([1,1,1,1])
@@ -135,8 +142,8 @@ if uploaded_files:
         st.pyplot(fig)
 
         # ---- 3. SUMMARY (by Vineyard and Block, all years) ----
-        st.subheader("Summary (by Vineyard and Block, all vintages)")
-        summary_cols = [col for col in ['Brix', 'pH', 'TA', 'MA'] if col in filtered.columns]
+        st.subheader("Summary (byol Vineyard and Block, all vintages)")
+        summary_cols = [col for c in ['Brix', 'pH', 'TA', 'MA'] if col in filtered.columns]
         if summary_cols:
             summary = filtered.groupby(['Vineyard', 'Block'])[summary_cols].mean(numeric_only=True).round(2)
             st.dataframe(summary)
