@@ -19,7 +19,7 @@ uploaded_files = st.file_uploader(
 
 if uploaded_files:
     all_data = []
-    for file in uploaded_files:
+    for i, file in enumerate(uploaded_files):
         year = file.name.split(" - ")[-1].replace(".xlsx", "")
         try:
             df_raw = pd.read_excel(file, sheet_name='Sheet1', header=7)
@@ -39,13 +39,13 @@ if uploaded_files:
             )
             continue
         df['Vintage'] = year
-        # Date handling with unique key
+        # Date handling with unique key per file (using enumerate index)
         if 'Date' in df.columns:
             df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         else:
             date_input = st.sidebar.date_input(
-                f"Collection date for {year}",
-                key=f"date_input_{year}_{file.name}"
+                f"Collection date for {year} ({file.name})",
+                key=f"date_input_{i}_{file.name}"
             )
             df['Date'] = pd.to_datetime(date_input)
         all_data.append(df)
@@ -142,8 +142,8 @@ if uploaded_files:
         st.pyplot(fig)
 
         # ---- 3. SUMMARY (by Vineyard and Block, all years) ----
-        st.subheader("Summary (byol Vineyard and Block, all vintages)")
-        summary_cols = [col for c in ['Brix', 'pH', 'TA', 'MA'] if col in filtered.columns]
+        st.subheader("Summary (by Vineyard and Block, all vintages)")
+        summary_cols = [col for col in ['Brix', 'pH', 'TA', 'MA'] if col in filtered.columns]
         if summary_cols:
             summary = filtered.groupby(['Vineyard', 'Block'])[summary_cols].mean(numeric_only=True).round(2)
             st.dataframe(summary)
