@@ -32,6 +32,14 @@ if uploaded_files:
         df_raw.columns = df_raw.iloc[0].astype(str).str.strip()
         df = df_raw[1:].copy()
         df.columns = df.columns.str.strip()
+        # Check for duplicate columns and skip files that have them
+        if df.columns.duplicated().any():
+            st.error(
+                f"Duplicate columns found in file {file.name}: "
+                f"{df.columns[df.columns.duplicated()].tolist()}. "
+                "Please fix the Excel file to remove duplicate column names."
+            )
+            continue
         df['Vintage'] = year
         # Date handling
         if 'Date' in df.columns:
@@ -58,7 +66,7 @@ if uploaded_files:
         # Filters
         st.sidebar.header("Filters")
         if 'Vintage' in df_all.columns and not df_all['Vintage'].dropna().empty:
-            vintages = sorted(df_all['Vintage'].dropna().unique())
+            vintages = sorted(df_all['Vintage'].dropna().astype(str).unique())
             selected_vintages = st.sidebar.multiselect("Vintages", vintages, default=vintages)
         else:
             st.error("No 'Vintage' column found or empty in the uploaded data.")
@@ -71,7 +79,6 @@ if uploaded_files:
 
         if 'Variety' in df_all.columns:
             if not df_all['Variety'].dropna().empty:
-                # Convert to string before sorting/selecting
                 varieties = sorted(df_all['Variety'].dropna().astype(str).unique())
                 variety = st.sidebar.selectbox("Variety", varieties)
             else:
@@ -81,7 +88,6 @@ if uploaded_files:
 
         if 'Block' in df_all.columns:
             if not df_all['Block'].dropna().empty:
-                # FIX: Convert to string before sorting/selecting
                 blocks = sorted(df_all['Block'].dropna().astype(str).unique())
                 block = st.sidebar.selectbox("Block", blocks)
             else:
@@ -102,7 +108,7 @@ if uploaded_files:
             'Date' in df_all.columns
         ):
             filtered = df_all[
-                (df_all['Vintage'].isin(selected_vintages)) &
+                (df_all['Vintage'].astype(str).isin([str(v) for v in selected_vintages])) &
                 (df_all['Variety'].astype(str) == str(variety)) &
                 (df_all['Block'].astype(str) == str(block))
             ].sort_values('Date')
@@ -110,7 +116,7 @@ if uploaded_files:
             # Plot comparison
             st.subheader(f"{metric} Comparison")
             for vintage in selected_vintages:
-                grp = filtered[filtered['Vintage'] == vintage]
+                grp = filtered[filtered['Vintage'].astype(str) == str(vintage)]
                 if not grp.empty:
                     # Defensive: Only plot if metric is available in group
                     if metric in grp.columns:
