@@ -319,18 +319,23 @@ if uploaded_files:
             if 'Vintage' in filtered.columns:
                 st.subheader(f"Mean {metric} by Vintage for {st.session_state['vineyard_select']} Block {st.session_state['block_select']}{title_variety}")
                 means = filtered.groupby('Vintage')[metric].mean().dropna()
-                vintages = pd.to_numeric(means.index)
-                values = means.values
-                fig2, ax2 = plt.subplots(figsize=(7,4))
-                ax2.scatter(vintages, values, color='tab:blue', label='Mean')
-                if len(vintages) > 1:
-                    reg = LinearRegression().fit(vintages.values.reshape(-1,1), values)
-                    y_pred = reg.predict(np.array([vintages.min(), vintages.max()]).reshape(-1,1))
-                    ax2.plot([vintages.min(), vintages.max()], y_pred, color='tab:red', linestyle='--', label='Best fit')
-                ax2.set_xlabel("Vintage")
-                ax2.set_ylabel(f"Mean {metric}")
-                ax2.set_title(f"Mean {metric} by Vintage")
-                ax2.legend()
-                st.pyplot(fig2)
+                # Only keep vintages that are fully numeric
+                numeric_vintages = [v for v in means.index if str(v).isdigit()]
+                if numeric_vintages:
+                    vintages = np.array([int(v) for v in numeric_vintages])
+                    values = means[numeric_vintages].values
+                    fig2, ax2 = plt.subplots(figsize=(7,4))
+                    ax2.scatter(vintages, values, color='tab:blue', label='Mean')
+                    if len(vintages) > 1:
+                        reg = LinearRegression().fit(vintages.reshape(-1,1), values)
+                        y_pred = reg.predict(np.array([vintages.min(), vintages.max()]).reshape(-1,1))
+                        ax2.plot([vintages.min(), vintages.max()], y_pred, color='tab:red', linestyle='--', label='Best fit')
+                    ax2.set_xlabel("Vintage")
+                    ax2.set_ylabel(f"Mean {metric}")
+                    ax2.set_title(f"Mean {metric} by Vintage")
+                    ax2.legend()
+                    st.pyplot(fig2)
+                else:
+                    st.info("No numeric vintage values to plot.")
         else:
             st.info("No summary metrics available for the selected data.")
