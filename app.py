@@ -22,7 +22,11 @@ if uploaded_files:
     all_data = []
     for file in uploaded_files:
         year = file.name.split(" - ")[-1].replace(".xlsx", "")
-        df_raw = pd.read_excel(file, sheet_name='Sheet1', header=7)
+        try:
+            df_raw = pd.read_excel(file, sheet_name='Sheet1', header=7)
+        except Exception as e:
+            st.error(f"Error reading '{file.name}': {e}")
+            continue
         df_raw.dropna(axis=1, how='all', inplace=True)
         # Set column names from first row and strip whitespace
         df_raw.columns = df_raw.iloc[0].astype(str).str.strip()
@@ -42,91 +46,111 @@ if uploaded_files:
         st.write(f"Columns in {file.name}:", df.columns.tolist())  # Debugging: Show column names
         all_data.append(df)
 
-    df_all = pd.concat(all_data, ignore_index=True)
-    df_all.columns = df_all.columns.str.strip()  # Ensure columns are stripped after concat
-
-    # Filters
-    st.sidebar.header("Filters")
-    vintages = sorted(df_all['Vintage'].dropna().unique())
-    selected_vintages = st.sidebar.multiselect("Vintages", vintages, default=vintages)
-
-    # Defensive checks to avoid errors if columns are missing
-    variety = None
-    block = None
-    metric = None
-
-    if 'Variety' in df_all.columns and not df_all['Variety'].dropna().empty:
-        varieties = sorted(df_all['Variety'].dropna().unique())
-        variety = st.sidebar.selectbox("Variety", varieties)
+    if not all_data:
+        st.error("No valid data could be loaded from the uploaded files.")
     else:
-        st.error("No 'Variety' column found in the uploaded data.")
+        df_all = pd.concat(all_data, ignore_index=True)
+        df_all.columns = df_all.columns.str.strip()  # Ensure columns are stripped after concat
 
-    if 'Block' in df_all.columns and not df_all['Block'].dropna().empty:
-        blocks = sorted(df_all['Block'].dropna().unique())
-        block = st.sidebar.selectbox("Block", blocks)
-    else:
-        st.error("No 'Block' column found in the uploaded data.")
+        # Debug: Show all columns after concat
+        st.write("All columns in concatenated data:", df_all.columns.tolist())
 
-    available_metrics = [col for col in ['Brix', 'pH', 'TA', 'MA'] if col in df_all.columns]
-    if available_metrics:
-        metric = st.sidebar.selectbox("Metric", available_metrics)
-    else:
-        st.error("None of the metric columns (Brix, pH, TA, MA) found in the uploaded data.")
+        # Filters
+        st.sidebar.header("Filters")
+        if 'Vintage' in df_all.columns and not df_all['Vintage'].dropna().empty:
+            vintages = sorted(df_all['Vintage'].dropna().unique())
+            selected_vintages = st.sidebar.multiselect("Vintages", vintages, default=vintages)
+        else:
+            st.error("No 'Vintage' column found or empty in the uploaded data.")
+            selected_vintages = []
 
-    # Only continue if all necessary columns are found
-    if variety and block and metric:
-        filtered = df_all[
-            (df_all['Vintage'].isin(selected_vintages)) &
-            (df_all['Variety'] == variety) &
-            (df_all['Block'] == block)
-        ].sort_values('Date')
+        # Defensive checks to avoid errors if columns are missing
+        variety = None
+        block = None
+        metric = None
 
-        # Plot comparison
-        st.subheader(f"{metric} Comparison")
-        for vintage in selected_vintages:
-            grp = filtered[filtered['Vintage'] == vintage]
-            if not grp.empty:
-                # Defensive: Only plot if metric is available in group
-                if metric in grp.columns:
-                    st.line_chart(grp.set_index('Date')[metric], width=700, height=300)
+        if 'Variety' in df_all.columns:
+            if not df_all['Variety'].dropna().empty:
+                varieties = sorted(df_all['Variety'].dropna().unique())
+                variety = st.sidebar.selectbox("Variety", varieties)
+            else:
+                st.error("'Variety' column is present but has no data.")
+        else:
+            st.error("No 'Variety' column found in the uploaded data.")
+
+        if 'Block' in df_all.columns:
+            if not df_all['Block'].dropna().empty:
+                blocks = sorted(df_all['Block'].dropna().unique())
+                block = st.sidebar.selectbox("Block", blocks)
+            else:
+                st.error("'Block' column is present but has no data.")
+        else:
+            st.error("No 'Block' column found in the uploaded data.")
+
+        available_metrics = [col for col in ['Brix', 'pH', 'TA', 'MA'] if col in df_all.columns]
+        if available_metrics:
+            metric = st.sidebar.selectbox("Metric", available_metrics)
+        else:
+            st.error("None of the metric columns (Brix, pH, TA, MA) found in the uploaded data.")
+
+        # Only continue if all necessary columns are found and have values
+        if (
+            variety and block and metric and
+            selected_vintages and
+            'Date' in df_all.columns
+        ):
+            filtered = df_all[
+                (df_all['Vintage'].isin(selected_vintages)) &
+                (df_all['Variety'] == variety) &
+                (df_all['Block'] == block)
+            ].sort_values('Date')
+
+            # Plot comparison
+            st.subheader(f"{metric} Comparison")
+            for vintage in selected_vintages:
+                grp = filtered[filtered['Vintage'] == vintage]
+                if not grp.empty:
+                    # Defensive: Only plot if metric is available in group
+                    if metric in grp.columns:
+                        st.line_chart(grp.set_index('Date')[metric], width=700, height=300)
+                    else:
+                        st.warning(f"Metric '{metric}' not found in data for vintage {vintage}.")
+
+            # Prediction
+            st.subheader("Readiness Prediction")
+            grp = filtered.dropna(subset=[metric, 'Date'])
+            if len(grp) > 1:
+                X = np.arange(len(grp)).reshape(-1, 1)
+                y = grp[metric].values
+                model = LinearRegression().fit(X, y)
+                future = np.arange(len(grp), len(grp) + 5).reshape(-1, 1)
+                preds = model.predict(future)
+                # Extend dates list for predictions
+                dates = list(grp['Date']) + [grp['Date'].max() + pd.Timedelta(days=7 * (i + 1)) for i in range(5)]
+                df_pred = pd.DataFrame({metric: np.concatenate([y, preds])}, index=dates)
+                st.line_chart(df_pred, width=700, height=300)
+                # Check readiness
+                if metric == "Brix":
+                    ready = np.where(preds >= brix_thresh)[0]
+                elif metric == "TA":
+                    ready = np.where(preds <= ta_thresh)[0]
+                elif metric == "pH":
+                    ready = np.where((preds >= ph_min) & (preds <= ph_max))[0]
                 else:
-                    st.warning(f"Metric '{metric}' not found in data for vintage {vintage}.")
-
-        # Prediction
-        st.subheader("Readiness Prediction")
-        grp = filtered.dropna(subset=[metric, 'Date'])
-        if len(grp) > 1:
-            X = np.arange(len(grp)).reshape(-1,1)
-            y = grp[metric].values
-            model = LinearRegression().fit(X, y)
-            future = np.arange(len(grp), len(grp)+5).reshape(-1,1)
-            preds = model.predict(future)
-            # Extend dates list for predictions
-            dates = list(grp['Date']) + [grp['Date'].max() + pd.Timedelta(days=7*(i+1)) for i in range(5)]
-            df_pred = pd.DataFrame({metric: np.concatenate([y, preds])}, index=dates)
-            st.line_chart(df_pred, width=700, height=300)
-            # Check readiness
-            if metric == "Brix":
-                ready = np.where(preds >= brix_thresh)[0]
-            elif metric == "TA":
-                ready = np.where(preds <= ta_thresh)[0]
-            elif metric == "pH":
-                ready = np.where((preds >= ph_min) & (preds <= ph_max))[0]
+                    ready = np.array([])  # For MA or other metrics
+                if ready.size > 0:
+                    date_ready = dates[len(grp) + ready[0]]
+                    st.success(f"Predicted readiness around {date_ready.date()}")
+                else:
+                    st.warning("No readiness predicted in forecast window.")
             else:
-                ready = np.array([])  # For MA or other metrics
-            if ready.size > 0:
-                date_ready = dates[len(grp) + ready[0]]
-                st.success(f"Predicted readiness around {date_ready.date()}")
-            else:
-                st.warning("No readiness predicted in forecast window.")
-        else:
-            st.warning("Not enough data points for prediction.")
+                st.warning("Not enough data points for prediction.")
 
-        # Summary
-        st.subheader("Summary")
-        summary_cols = [col for col in ['Brix','pH','TA','MA'] if col in filtered.columns]
-        if summary_cols:
-            summary = filtered.groupby('Vintage')[summary_cols].mean(numeric_only=True).round(2)
-            st.dataframe(summary)
-        else:
-            st.info("No summary metrics available for the selected data.")
+            # Summary
+            st.subheader("Summary")
+            summary_cols = [col for col in ['Brix', 'pH', 'TA', 'MA'] if col in filtered.columns]
+            if summary_cols:
+                summary = filtered.groupby('Vintage')[summary_cols].mean(numeric_only=True).round(2)
+                st.dataframe(summary)
+            else:
+                st.info("No summary metrics available for the selected data.")
