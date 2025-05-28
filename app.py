@@ -1,7 +1,9 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import datetime
 from sklearn.linear_model import LinearRegression
+import matplotlib.pyplot as plt
 
 st.title("Grape Maturity Tracker")
 
@@ -47,80 +49,96 @@ if uploaded_files:
     else:
         df_all = pd.concat(all_data, ignore_index=True)
         df_all.columns = df_all.columns.str.strip()
-        # Ensure vineyard column exists for grouping
-        if 'Vineyard' not in df_all.columns:
-            st.error("No 'Vineyard' column found in the uploaded data. Please add a 'Vineyard' column.")
+        # Ensure these columns exist
+        for col in ['Brix', 'pH', 'TA', 'MA']:
+            if col in df_all.columns:
+                df_all[col] = pd.to_numeric(df_all[col], errors='coerce')
+
+        # --- FILTERING & FLIPPING FUNCTIONALITY ---
+        st.sidebar.header("Vineyard and Block Navigation")
+        vineyards = sorted(df_all['Vineyard'].dropna().astype(str).unique())
+        vineyard = st.sidebar.selectbox("Vineyard", vineyards, key="vineyard_select")
+
+        blocks = sorted(df_all[df_all['Vineyard'].astype(str) == vineyard]['Block'].dropna().astype(str).unique())
+        block = st.sidebar.selectbox("Block", blocks, key="block_select")
+
+        # Flip-through feature: "Previous" and "Next" buttons for Vineyard/Block
+        v_idx = vineyards.index(vineyard)
+        b_idx = blocks.index(block)
+        col1, col2, col3, col4 = st.sidebar.columns([1,1,1,1])
+        with col1:
+            if st.button("Prev Vineyard") and v_idx > 0:
+                st.session_state['vineyard_select'] = vineyards[v_idx - 1]
+        with col2:
+            if st.button("Next Vineyard") and v_idx < len(vineyards)-1:
+                st.session_state['vineyard_select'] = vineyards[v_idx + 1]
+        with col3:
+            if st.button("Prev Block") and b_idx > 0:
+                st.session_state['block_select'] = blocks[b_idx - 1]
+        with col4:
+            if st.button("Next Block") and b_idx < len(blocks)-1:
+                st.session_state['block_select'] = blocks[b_idx + 1]
+
+        available_metrics = [col for col in ['Brix', 'pH', 'TA', 'MA'] if col in df_all.columns]
+        metric = st.sidebar.selectbox("Metric", available_metrics)
+
+        # --- FILTERED DATA ---
+        filtered = df_all[
+            (df_all['Vineyard'].astype(str) == vineyard) &
+            (df_all['Block'].astype(str) == block)
+        ].copy()
+
+        # ---- 1. PREDICTION: Only current calendar year ----
+        st.subheader(f"Prediction for {vineyard} Block {block} in {datetime.datetime.now().year}")
+        current_year = datetime.datetime.now().year
+        filtered_pred = filtered[
+            filtered['Date'].dt.year == current_year
+        ].dropna(subset=[metric, 'Date']).copy()
+        filtered_pred[metric] = pd.to_numeric(filtered_pred[metric], errors='coerce')
+        filtered_pred = filtered_pred.dropna(subset=[metric])
+        if len(filtered_pred) > 1:
+            grp = filtered_pred.sort_values('Date')
+            X = np.arange(len(grp)).reshape(-1, 1)
+            y = grp[metric].values
+            model = LinearRegression().fit(X, y)
+            future = np.arange(len(grp), len(grp) + 5).reshape(-1, 1)
+            preds = model.predict(future)
+            dates = list(grp['Date']) + [grp['Date'].max() + pd.Timedelta(days=7 * (i + 1)) for i in range(5)]
+            df_pred = pd.DataFrame({metric: np.concatenate([y, preds])}, index=dates)
+            st.line_chart(df_pred, width=700, height=300)
+            ready = np.array([])
+            if metric == "Brix":
+                ready = np.where(preds >= brix_thresh)[0]
+            elif metric == "TA":
+                ready = np.where(preds <= ta_thresh)[0]
+            elif metric == "pH":
+                ready = np.where((preds >= ph_min) & (preds <= ph_max))[0]
+            if ready.size > 0:
+                date_ready = dates[len(grp) + ready[0]]
+                st.success(f"Predicted readiness around {date_ready.date()}")
+            else:
+                st.warning("No readiness predicted in forecast window.")
         else:
-            for col in ['Brix', 'pH', 'TA', 'MA']:
-                if col in df_all.columns:
-                    df_all[col] = pd.to_numeric(df_all[col], errors='coerce')
+            st.warning("Not enough data points for prediction for the current year.")
 
-            st.sidebar.header("Filters")
-            varieties = sorted(df_all['Variety'].dropna().astype(str).unique()) if 'Variety' in df_all.columns else []
-            vineyards = sorted(df_all['Vineyard'].dropna().astype(str).unique())
-            blocks = sorted(df_all['Block'].dropna().astype(str).unique()) if 'Block' in df_all.columns else []
-            vintages = sorted(df_all['Vintage'].dropna().astype(str).unique())
-            available_metrics = [col for col in ['Brix', 'pH', 'TA', 'MA'] if col in df_all.columns]
-            vineyard = st.sidebar.selectbox("Vineyard", vineyards)
-            block = st.sidebar.selectbox("Block", blocks)
-            metric = st.sidebar.selectbox("Metric", available_metrics)
-            vintage = st.sidebar.selectbox("Vintage (for Prediction)", vintages)
+        # ---- 2. AGGREGATE PLOTS: All vintages for this block/vineyard ----
+        st.subheader(f"All Vintages: {vineyard} Block {block} ({metric})")
+        fig, ax = plt.subplots(figsize=(9,5))
+        for vtg in sorted(filtered['Vintage'].dropna().unique()):
+            grp = filtered[filtered['Vintage'] == vtg].dropna(subset=['Date', metric])
+            if len(grp):
+                ax.plot(grp['Date'], grp[metric], marker='o', label=str(vtg))
+        ax.set_title(f"All Vintages for {vineyard} Block {block} ({metric})")
+        ax.set_xlabel("Date")
+        ax.set_ylabel(metric)
+        ax.legend(title="Vintage", loc="best", fontsize='small')
+        st.pyplot(fig)
 
-            # FILTER FOR SELECTED VINEYARD/BLOCK/METRIC
-            filtered = df_all[
-                (df_all['Vineyard'].astype(str) == str(vineyard)) &
-                (df_all['Block'].astype(str) == str(block))
-            ].copy()
-
-            # --- 1. PREDICTION: Only use selected vintage ---
-            st.subheader(f"Prediction for {vineyard} Block {block} ({vintage})")
-            filtered_pred = filtered[filtered['Vintage'].astype(str) == str(vintage)].dropna(subset=[metric, 'Date']).copy()
-            filtered_pred[metric] = pd.to_numeric(filtered_pred[metric], errors='coerce')
-            filtered_pred = filtered_pred.dropna(subset=[metric])
-            if len(filtered_pred) > 1:
-                grp = filtered_pred.sort_values('Date')
-                X = np.arange(len(grp)).reshape(-1, 1)
-                y = grp[metric].values
-                model = LinearRegression().fit(X, y)
-                future = np.arange(len(grp), len(grp) + 5).reshape(-1, 1)
-                preds = model.predict(future)
-                dates = list(grp['Date']) + [grp['Date'].max() + pd.Timedelta(days=7 * (i + 1)) for i in range(5)]
-                df_pred = pd.DataFrame({metric: np.concatenate([y, preds])}, index=dates)
-                st.line_chart(df_pred, width=700, height=300)
-                ready = np.array([])
-                if metric == "Brix":
-                    ready = np.where(preds >= brix_thresh)[0]
-                elif metric == "TA":
-                    ready = np.where(preds <= ta_thresh)[0]
-                elif metric == "pH":
-                    ready = np.where((preds >= ph_min) & (preds <= ph_max))[0]
-                if ready.size > 0:
-                    date_ready = dates[len(grp) + ready[0]]
-                    st.success(f"Predicted readiness around {date_ready.date()}")
-                else:
-                    st.warning("No readiness predicted in forecast window.")
-            else:
-                st.warning("Not enough data points for prediction.")
-
-            # --- 2. AGGREGATE PLOTS: Show all vintages for this block/vineyard ---
-            st.subheader(f"All Vintages: {vineyard} Block {block} ({metric})")
-            import matplotlib.pyplot as plt
-            fig, ax = plt.subplots(figsize=(9,5))
-            for vtg in sorted(filtered['Vintage'].dropna().unique()):
-                grp = filtered[filtered['Vintage'] == vtg].dropna(subset=['Date', metric])
-                if len(grp):
-                    ax.plot(grp['Date'], grp[metric], marker='o', label=str(vtg))
-            ax.set_title(f"All Vintages for {vineyard} Block {block} ({metric})")
-            ax.set_xlabel("Date")
-            ax.set_ylabel(metric)
-            ax.legend(title="Vintage", loc="best", fontsize='small')
-            st.pyplot(fig)
-
-            # --- 3. SUMMARY (optional, across all vintages) ---
-            st.subheader("Summary (by Vineyard and Block)")
-            summary_cols = [col for col in ['Brix', 'pH', 'TA', 'MA'] if col in filtered.columns]
-            if summary_cols:
-                summary = filtered.groupby(['Vineyard', 'Block'])[summary_cols].mean(numeric_only=True).round(2)
-                st.dataframe(summary)
-            else:
-                st.info("No summary metrics available for the selected data.")
+        # ---- 3. SUMMARY (by Vineyard and Block, all years) ----
+        st.subheader("Summary (by Vineyard and Block, all vintages)")
+        summary_cols = [col for col in ['Brix', 'pH', 'TA', 'MA'] if col in filtered.columns]
+        if summary_cols:
+            summary = filtered.groupby(['Vineyard', 'Block'])[summary_cols].mean(numeric_only=True).round(2)
+            st.dataframe(summary)
+        else:
+            st.info("No summary metrics available for the selected data.")
