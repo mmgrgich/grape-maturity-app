@@ -71,6 +71,7 @@ if uploaded_files:
 
         if 'Variety' in df_all.columns:
             if not df_all['Variety'].dropna().empty:
+                # Convert to string before sorting/selecting
                 varieties = sorted(df_all['Variety'].dropna().astype(str).unique())
                 variety = st.sidebar.selectbox("Variety", varieties)
             else:
@@ -80,6 +81,7 @@ if uploaded_files:
 
         if 'Block' in df_all.columns:
             if not df_all['Block'].dropna().empty:
+                # FIX: Convert to string before sorting/selecting
                 blocks = sorted(df_all['Block'].dropna().astype(str).unique())
                 block = st.sidebar.selectbox("Block", blocks)
             else:
