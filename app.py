@@ -46,10 +46,19 @@ if uploaded_files:
         if 'Date' in df.columns:
             df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         else:
+            st.warning(
+                f"File '{file.name}' is missing a 'Date' column. "
+                f"Please enter the correct collection date for this file below. "
+                f"Incorrect dates may result in prediction errors.",
+                icon="⚠️"
+            )
             date_input = st.sidebar.date_input(
-                f"Collection date for {year} ({file.name})",
+                f"Collection date for {year} ({file.name}) [REQUIRED]",
+                value=None,
                 key=f"date_input_{i}_{file.name}"
             )
+            if date_input is None:
+                st.stop()  # Force user to pick a date
             df['Date'] = pd.to_datetime(date_input)
         all_data.append(df)
     if not all_data:
@@ -106,7 +115,13 @@ if uploaded_files:
         ].dropna(subset=[metric, 'Date']).copy()
         filtered_pred[metric] = pd.to_numeric(filtered_pred[metric], errors='coerce')
         filtered_pred = filtered_pred.dropna(subset=[metric])
-        if len(filtered_pred) > 1:
+        if filtered_pred.empty:
+            st.warning(
+                f"No data for {current_year} in your uploaded files. "
+                f"Please upload files with data from this year or enter correct dates.",
+                icon="⚠️"
+            )
+        elif len(filtered_pred) > 1:
             grp = filtered_pred.sort_values('Date')
             X = np.arange(len(grp)).reshape(-1, 1)
             y = grp[metric].values
