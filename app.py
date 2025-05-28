@@ -39,11 +39,6 @@ if uploaded_files:
         else:
             date_input = st.sidebar.date_input(f"Collection date for {year}")
             df['Date'] = pd.to_datetime(date_input)
-        # Convert metrics if columns exist
-        for col in ['Brix', 'pH', 'TA', 'MA']:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-        st.write(f"Columns in {file.name}:", df.columns.tolist())  # Debugging: Show column names
         all_data.append(df)
 
     if not all_data:
@@ -51,6 +46,11 @@ if uploaded_files:
     else:
         df_all = pd.concat(all_data, ignore_index=True)
         df_all.columns = df_all.columns.str.strip()  # Ensure columns are stripped after concat
+
+        # Convert metrics if columns exist (do this after concat in case any non-numeric slipped in)
+        for col in ['Brix', 'pH', 'TA', 'MA']:
+            if col in df_all.columns:
+                df_all[col] = pd.to_numeric(df_all[col], errors='coerce')
 
         # Debug: Show all columns after concat
         st.write("All columns in concatenated data:", df_all.columns.tolist())
@@ -71,7 +71,7 @@ if uploaded_files:
 
         if 'Variety' in df_all.columns:
             if not df_all['Variety'].dropna().empty:
-                varieties = sorted(df_all['Variety'].dropna().unique())
+                varieties = sorted(df_all['Variety'].dropna().astype(str).unique())
                 variety = st.sidebar.selectbox("Variety", varieties)
             else:
                 st.error("'Variety' column is present but has no data.")
@@ -80,7 +80,7 @@ if uploaded_files:
 
         if 'Block' in df_all.columns:
             if not df_all['Block'].dropna().empty:
-                blocks = sorted(df_all['Block'].dropna().unique())
+                blocks = sorted(df_all['Block'].dropna().astype(str).unique())
                 block = st.sidebar.selectbox("Block", blocks)
             else:
                 st.error("'Block' column is present but has no data.")
@@ -101,8 +101,8 @@ if uploaded_files:
         ):
             filtered = df_all[
                 (df_all['Vintage'].isin(selected_vintages)) &
-                (df_all['Variety'] == variety) &
-                (df_all['Block'] == block)
+                (df_all['Variety'].astype(str) == str(variety)) &
+                (df_all['Block'].astype(str) == str(block))
             ].sort_values('Date')
 
             # Plot comparison
@@ -118,7 +118,9 @@ if uploaded_files:
 
             # Prediction
             st.subheader("Readiness Prediction")
-            grp = filtered.dropna(subset=[metric, 'Date'])
+            grp = filtered.dropna(subset=[metric, 'Date']).copy()
+            grp[metric] = pd.to_numeric(grp[metric], errors='coerce')  # Ensure numeric
+            grp = grp.dropna(subset=[metric])
             if len(grp) > 1:
                 X = np.arange(len(grp)).reshape(-1, 1)
                 y = grp[metric].values
@@ -130,14 +132,14 @@ if uploaded_files:
                 df_pred = pd.DataFrame({metric: np.concatenate([y, preds])}, index=dates)
                 st.line_chart(df_pred, width=700, height=300)
                 # Check readiness
+                ready = np.array([])
                 if metric == "Brix":
                     ready = np.where(preds >= brix_thresh)[0]
                 elif metric == "TA":
                     ready = np.where(preds <= ta_thresh)[0]
                 elif metric == "pH":
                     ready = np.where((preds >= ph_min) & (preds <= ph_max))[0]
-                else:
-                    ready = np.array([])  # For MA or other metrics
+                # For MA or other metrics, no readiness
                 if ready.size > 0:
                     date_ready = dates[len(grp) + ready[0]]
                     st.success(f"Predicted readiness around {date_ready.date()}")
