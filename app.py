@@ -5,6 +5,7 @@ import datetime
 import re
 from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
 st.title("Grape Maturity Tracker")
 
@@ -85,58 +86,143 @@ if uploaded_files:
             if col in df_all.columns:
                 df_all[col] = pd.to_numeric(df_all[col], errors='coerce')
 
-        # --- FILTERING & FLIP-THROUGH FUNCTIONALITY (Improved) ---
-        st.sidebar.header("Vineyard and Block Navigation")
+        # --- FILTERING & FLIP-THROUGH FUNCTIONALITY (Now with Variety) ---
+        st.sidebar.header("Vineyard, Block, and Variety Navigation")
 
+        # Vineyard selection
         vineyards = sorted(df_all['Vineyard'].dropna().astype(str).unique())
         if "vineyard_select" not in st.session_state:
             st.session_state["vineyard_select"] = vineyards[0]
         vineyard = st.session_state["vineyard_select"]
 
+        # Block selection
         blocks = sorted(df_all[df_all['Vineyard'].astype(str) == vineyard]['Block'].dropna().astype(str).unique())
         if "block_select" not in st.session_state or st.session_state["block_select"] not in blocks:
             st.session_state["block_select"] = blocks[0]
         block = st.session_state["block_select"]
 
+        # Variety selection
+        if 'Variety' in df_all.columns:
+            varieties = sorted(df_all[
+                (df_all['Vineyard'].astype(str) == vineyard) &
+                (df_all['Block'].astype(str) == block)
+            ]['Variety'].dropna().astype(str).unique())
+            if not varieties:
+                varieties = ['']
+            if "variety_select" not in st.session_state or st.session_state["variety_select"] not in varieties:
+                st.session_state["variety_select"] = varieties[0]
+            variety = st.session_state["variety_select"]
+        else:
+            varieties = ['']
+            variety = ''
+
         # Sidebar selectboxes, always tied to session state
         vineyard = st.sidebar.selectbox("Vineyard", vineyards, index=vineyards.index(vineyard), key="vineyard_select")
         blocks = sorted(df_all[df_all['Vineyard'].astype(str) == vineyard]['Block'].dropna().astype(str).unique())
         block = st.sidebar.selectbox("Block", blocks, index=blocks.index(block) if block in blocks else 0, key="block_select")
+        if 'Variety' in df_all.columns:
+            varieties = sorted(df_all[
+                (df_all['Vineyard'].astype(str) == vineyard) &
+                (df_all['Block'].astype(str) == block)
+            ]['Variety'].dropna().astype(str).unique())
+            if not varieties:
+                varieties = ['']
+            variety = st.sidebar.selectbox("Variety", varieties, index=varieties.index(variety) if variety in varieties else 0, key="variety_select")
+        else:
+            variety = ''
 
-        # Update session state on change (when vineyard is changed, reset block)
+        # When vineyard/block/variety is changed, reset lower levels
         if vineyard != st.session_state["vineyard_select"]:
             st.session_state["vineyard_select"] = vineyard
             new_blocks = sorted(df_all[df_all['Vineyard'].astype(str) == vineyard]['Block'].dropna().astype(str).unique())
             st.session_state["block_select"] = new_blocks[0] if new_blocks else None
-
+            # Reset variety for new block
+            if 'Variety' in df_all.columns:
+                new_varieties = sorted(df_all[
+                    (df_all['Vineyard'].astype(str) == vineyard) &
+                    (df_all['Block'].astype(str) == st.session_state["block_select"])
+                ]['Variety'].dropna().astype(str).unique())
+                st.session_state["variety_select"] = new_varieties[0] if new_varieties else ''
         if block != st.session_state["block_select"]:
             st.session_state["block_select"] = block
+            if 'Variety' in df_all.columns:
+                new_varieties = sorted(df_all[
+                    (df_all['Vineyard'].astype(str) == vineyard) &
+                    (df_all['Block'].astype(str) == block)
+                ]['Variety'].dropna().astype(str).unique())
+                st.session_state["variety_select"] = new_varieties[0] if new_varieties else ''
+        if 'Variety' in df_all.columns and variety != st.session_state["variety_select"]:
+            st.session_state["variety_select"] = variety
 
-        # Navigation buttons
+        # Navigation buttons (Vineyard/Block/Variety)
         v_idx = vineyards.index(st.session_state["vineyard_select"])
         blocks = sorted(df_all[df_all['Vineyard'].astype(str) == st.session_state["vineyard_select"]]['Block'].dropna().astype(str).unique())
         b_idx = blocks.index(st.session_state["block_select"]) if st.session_state["block_select"] in blocks else 0
-        col1, col2, col3, col4 = st.sidebar.columns([1,1,1,1])
+        if 'Variety' in df_all.columns:
+            varieties = sorted(df_all[
+                (df_all['Vineyard'].astype(str) == st.session_state["vineyard_select"]) &
+                (df_all['Block'].astype(str) == st.session_state["block_select"])
+            ]['Variety'].dropna().astype(str).unique())
+            if not varieties:
+                varieties = ['']
+            var_idx = varieties.index(st.session_state["variety_select"]) if st.session_state["variety_select"] in varieties else 0
+        else:
+            varieties = ['']
+            var_idx = 0
+        col1, col2, col3, col4, col5, col6 = st.sidebar.columns([1,1,1,1,1,1])
         with col1:
             if st.button("Prev Vineyard"):
                 if v_idx > 0:
                     st.session_state["vineyard_select"] = vineyards[v_idx - 1]
                     new_blocks = sorted(df_all[df_all['Vineyard'].astype(str) == vineyards[v_idx - 1]]['Block'].dropna().astype(str).unique())
                     st.session_state["block_select"] = new_blocks[0] if new_blocks else None
+                    if 'Variety' in df_all.columns:
+                        new_varieties = sorted(df_all[
+                            (df_all['Vineyard'].astype(str) == vineyards[v_idx - 1]) &
+                            (df_all['Block'].astype(str) == st.session_state["block_select"])
+                        ]['Variety'].dropna().astype(str).unique())
+                        st.session_state["variety_select"] = new_varieties[0] if new_varieties else ''
         with col2:
             if st.button("Next Vineyard"):
                 if v_idx < len(vineyards)-1:
                     st.session_state["vineyard_select"] = vineyards[v_idx + 1]
                     new_blocks = sorted(df_all[df_all['Vineyard'].astype(str) == vineyards[v_idx + 1]]['Block'].dropna().astype(str).unique())
                     st.session_state["block_select"] = new_blocks[0] if new_blocks else None
+                    if 'Variety' in df_all.columns:
+                        new_varieties = sorted(df_all[
+                            (df_all['Vineyard'].astype(str) == vineyards[v_idx + 1]) &
+                            (df_all['Block'].astype(str) == st.session_state["block_select"])
+                        ]['Variety'].dropna().astype(str).unique())
+                        st.session_state["variety_select"] = new_varieties[0] if new_varieties else ''
         with col3:
             if st.button("Prev Block"):
                 if b_idx > 0:
                     st.session_state["block_select"] = blocks[b_idx - 1]
+                    if 'Variety' in df_all.columns:
+                        new_varieties = sorted(df_all[
+                            (df_all['Vineyard'].astype(str) == st.session_state["vineyard_select"]) &
+                            (df_all['Block'].astype(str) == blocks[b_idx - 1])
+                        ]['Variety'].dropna().astype(str).unique())
+                        st.session_state["variety_select"] = new_varieties[0] if new_varieties else ''
         with col4:
             if st.button("Next Block"):
                 if b_idx < len(blocks)-1:
                     st.session_state["block_select"] = blocks[b_idx + 1]
+                    if 'Variety' in df_all.columns:
+                        new_varieties = sorted(df_all[
+                            (df_all['Vineyard'].astype(str) == st.session_state["vineyard_select"]) &
+                            (df_all['Block'].astype(str) == blocks[b_idx + 1])
+                        ]['Variety'].dropna().astype(str).unique())
+                        st.session_state["variety_select"] = new_varieties[0] if new_varieties else ''
+        if 'Variety' in df_all.columns:
+            with col5:
+                if st.button("Prev Variety"):
+                    if var_idx > 0:
+                        st.session_state["variety_select"] = varieties[var_idx - 1]
+            with col6:
+                if st.button("Next Variety"):
+                    if var_idx < len(varieties) - 1:
+                        st.session_state["variety_select"] = varieties[var_idx + 1]
 
         # --- Metric selection ---
         available_metrics = [col for col in ['Brix', 'pH', 'TA', 'MA'] if col in df_all.columns]
@@ -147,9 +233,12 @@ if uploaded_files:
             (df_all['Vineyard'].astype(str) == st.session_state["vineyard_select"]) &
             (df_all['Block'].astype(str) == st.session_state["block_select"])
         ].copy()
+        if 'Variety' in df_all.columns:
+            filtered = filtered[filtered['Variety'].astype(str) == st.session_state["variety_select"]]
 
         # ---- 1. PREDICTION: Only current calendar year ----
-        st.subheader(f"Prediction for {st.session_state['vineyard_select']} Block {st.session_state['block_select']} in {datetime.datetime.now().year}")
+        title_variety = f" ({st.session_state['variety_select']})" if st.session_state.get("variety_select", '') else ''
+        st.subheader(f"Prediction for {st.session_state['vineyard_select']} Block {st.session_state['block_select']}{title_variety} in {datetime.datetime.now().year}")
         current_year = datetime.datetime.now().year
         filtered_pred = filtered[
             filtered['Date'].dt.year == current_year
@@ -187,24 +276,48 @@ if uploaded_files:
         else:
             st.warning("Not enough data points for prediction for the current year.")
 
-        # ---- 2. AGGREGATE PLOTS: All vintages for this block/vineyard ----
-        st.subheader(f"All Vintages: {st.session_state['vineyard_select']} Block {st.session_state['block_select']} ({metric})")
+        # ---- 2. AGGREGATE PLOTS: All vintages for this block/vineyard/variety (only June-Dec) ----
+        st.subheader(f"All Vintages: {st.session_state['vineyard_select']} Block {st.session_state['block_select']}{title_variety} ({metric})")
+
         fig, ax = plt.subplots(figsize=(9,5))
-        for vtg in sorted(filtered['Vintage'].dropna().unique()):
-            grp = filtered[filtered['Vintage'] == vtg].dropna(subset=['Date', metric])
-            if len(grp):
-                ax.plot(grp['Date'], grp[metric], marker='o', label=str(vtg))
-        ax.set_title(f"All Vintages for {st.session_state['vineyard_select']} Block {st.session_state['block_select']} ({metric})")
-        ax.set_xlabel("Date")
+
+        # Filter for only June 1 to December 31 for any year
+        mask_grow = filtered['Date'].dt.month.between(6,12)
+        filtered_grow = filtered[mask_grow].copy()
+
+        vintages = sorted(filtered_grow['Vintage'].dropna().unique())
+        colors = plt.cm.get_cmap('tab10', len(vintages))
+
+        for idx, vtg in enumerate(vintages):
+            grp = filtered_grow[filtered_grow['Vintage'] == vtg].dropna(subset=['Date', metric])
+            if not grp.empty:
+                # Normalize x-axis to always show June 1 - Dec 31
+                grp = grp.sort_values('Date')
+                ax.plot(grp['Date'], grp[metric], marker='o', label=str(vtg), color=colors(idx))
+
+        # Set x-axis limits and formatting
+        year_for_axis = 2024
+        x_start = pd.Timestamp(f"{year_for_axis}-06-01")
+        x_end = pd.Timestamp(f"{year_for_axis}-12-31")
+        ax.set_xlim(x_start, x_end)
+        ax.xaxis.set_major_locator(mdates.MonthLocator())
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
+
+        ax.set_title(f"All Vintages for {st.session_state['vineyard_select']} Block {st.session_state['block_select']}{title_variety} ({metric})")
+        ax.set_xlabel("Month")
         ax.set_ylabel(metric)
         ax.legend(title="Vintage", loc="best", fontsize='small')
+        plt.tight_layout()
         st.pyplot(fig)
 
-        # ---- 3. SUMMARY (by Vineyard and Block, all years) ----
-        st.subheader("Summary (by Vineyard and Block, all vintages)")
+        # ---- 3. SUMMARY (by Vineyard, Block, Variety, all years) ----
+        st.subheader("Summary (by Vineyard, Block, Variety, all vintages)")
         summary_cols = [col for col in ['Brix', 'pH', 'TA', 'MA'] if col in filtered.columns]
+        group_cols = ['Vineyard', 'Block']
+        if 'Variety' in filtered.columns:
+            group_cols.append('Variety')
         if summary_cols:
-            summary = filtered.groupby(['Vineyard', 'Block'])[summary_cols].mean(numeric_only=True).round(2)
+            summary = filtered.groupby(group_cols)[summary_cols].mean(numeric_only=True).round(2)
             st.dataframe(summary)
         else:
             st.info("No summary metrics available for the selected data.")
