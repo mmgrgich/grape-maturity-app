@@ -85,40 +85,71 @@ if uploaded_files:
             if col in df_all.columns:
                 df_all[col] = pd.to_numeric(df_all[col], errors='coerce')
 
+        # --- FILTERING & FLIP-THROUGH FUNCTIONALITY (Improved) ---
         st.sidebar.header("Vineyard and Block Navigation")
-        if 'Vineyard' not in df_all.columns or 'Block' not in df_all.columns:
-            st.error("Missing required columns: 'Vineyard' and/or 'Block'. Check your Excel file headers.")
-            st.write("Columns found:", df_all.columns.tolist())
-            st.stop()
+
         vineyards = sorted(df_all['Vineyard'].dropna().astype(str).unique())
-        vineyard = st.sidebar.selectbox("Vineyard", vineyards, key="vineyard_select")
+        if "vineyard_select" not in st.session_state:
+            st.session_state["vineyard_select"] = vineyards[0]
+        vineyard = st.session_state["vineyard_select"]
+
         blocks = sorted(df_all[df_all['Vineyard'].astype(str) == vineyard]['Block'].dropna().astype(str).unique())
-        block = st.sidebar.selectbox("Block", blocks, key="block_select")
-        v_idx = vineyards.index(vineyard)
-        b_idx = blocks.index(block)
+        if "block_select" not in st.session_state or st.session_state["block_select"] not in blocks:
+            st.session_state["block_select"] = blocks[0]
+        block = st.session_state["block_select"]
+
+        # Sidebar selectboxes, always tied to session state
+        vineyard = st.sidebar.selectbox("Vineyard", vineyards, index=vineyards.index(vineyard), key="vineyard_select")
+        blocks = sorted(df_all[df_all['Vineyard'].astype(str) == vineyard]['Block'].dropna().astype(str).unique())
+        block = st.sidebar.selectbox("Block", blocks, index=blocks.index(block) if block in blocks else 0, key="block_select")
+
+        # Update session state on change (when vineyard is changed, reset block)
+        if vineyard != st.session_state["vineyard_select"]:
+            st.session_state["vineyard_select"] = vineyard
+            new_blocks = sorted(df_all[df_all['Vineyard'].astype(str) == vineyard]['Block'].dropna().astype(str).unique())
+            st.session_state["block_select"] = new_blocks[0] if new_blocks else None
+
+        if block != st.session_state["block_select"]:
+            st.session_state["block_select"] = block
+
+        # Navigation buttons
+        v_idx = vineyards.index(st.session_state["vineyard_select"])
+        blocks = sorted(df_all[df_all['Vineyard'].astype(str) == st.session_state["vineyard_select"]]['Block'].dropna().astype(str).unique())
+        b_idx = blocks.index(st.session_state["block_select"]) if st.session_state["block_select"] in blocks else 0
         col1, col2, col3, col4 = st.sidebar.columns([1,1,1,1])
         with col1:
-            if st.button("Prev Vineyard") and v_idx > 0:
-                st.session_state['vineyard_select'] = vineyards[v_idx - 1]
+            if st.button("Prev Vineyard"):
+                if v_idx > 0:
+                    st.session_state["vineyard_select"] = vineyards[v_idx - 1]
+                    new_blocks = sorted(df_all[df_all['Vineyard'].astype(str) == vineyards[v_idx - 1]]['Block'].dropna().astype(str).unique())
+                    st.session_state["block_select"] = new_blocks[0] if new_blocks else None
         with col2:
-            if st.button("Next Vineyard") and v_idx < len(vineyards)-1:
-                st.session_state['vineyard_select'] = vineyards[v_idx + 1]
+            if st.button("Next Vineyard"):
+                if v_idx < len(vineyards)-1:
+                    st.session_state["vineyard_select"] = vineyards[v_idx + 1]
+                    new_blocks = sorted(df_all[df_all['Vineyard'].astype(str) == vineyards[v_idx + 1]]['Block'].dropna().astype(str).unique())
+                    st.session_state["block_select"] = new_blocks[0] if new_blocks else None
         with col3:
-            if st.button("Prev Block") and b_idx > 0:
-                st.session_state['block_select'] = blocks[b_idx - 1]
+            if st.button("Prev Block"):
+                if b_idx > 0:
+                    st.session_state["block_select"] = blocks[b_idx - 1]
         with col4:
-            if st.button("Next Block") and b_idx < len(blocks)-1:
-                st.session_state['block_select'] = blocks[b_idx + 1]
+            if st.button("Next Block"):
+                if b_idx < len(blocks)-1:
+                    st.session_state["block_select"] = blocks[b_idx + 1]
 
+        # --- Metric selection ---
         available_metrics = [col for col in ['Brix', 'pH', 'TA', 'MA'] if col in df_all.columns]
         metric = st.sidebar.selectbox("Metric", available_metrics)
 
+        # --- FILTERED DATA ---
         filtered = df_all[
-            (df_all['Vineyard'].astype(str) == vineyard) &
-            (df_all['Block'].astype(str) == block)
+            (df_all['Vineyard'].astype(str) == st.session_state["vineyard_select"]) &
+            (df_all['Block'].astype(str) == st.session_state["block_select"])
         ].copy()
 
-        st.subheader(f"Prediction for {vineyard} Block {block} in {datetime.datetime.now().year}")
+        # ---- 1. PREDICTION: Only current calendar year ----
+        st.subheader(f"Prediction for {st.session_state['vineyard_select']} Block {st.session_state['block_select']} in {datetime.datetime.now().year}")
         current_year = datetime.datetime.now().year
         filtered_pred = filtered[
             filtered['Date'].dt.year == current_year
@@ -156,18 +187,20 @@ if uploaded_files:
         else:
             st.warning("Not enough data points for prediction for the current year.")
 
-        st.subheader(f"All Vintages: {vineyard} Block {block} ({metric})")
+        # ---- 2. AGGREGATE PLOTS: All vintages for this block/vineyard ----
+        st.subheader(f"All Vintages: {st.session_state['vineyard_select']} Block {st.session_state['block_select']} ({metric})")
         fig, ax = plt.subplots(figsize=(9,5))
         for vtg in sorted(filtered['Vintage'].dropna().unique()):
             grp = filtered[filtered['Vintage'] == vtg].dropna(subset=['Date', metric])
             if len(grp):
                 ax.plot(grp['Date'], grp[metric], marker='o', label=str(vtg))
-        ax.set_title(f"All Vintages for {vineyard} Block {block} ({metric})")
+        ax.set_title(f"All Vintages for {st.session_state['vineyard_select']} Block {st.session_state['block_select']} ({metric})")
         ax.set_xlabel("Date")
         ax.set_ylabel(metric)
         ax.legend(title="Vintage", loc="best", fontsize='small')
         st.pyplot(fig)
 
+        # ---- 3. SUMMARY (by Vineyard and Block, all years) ----
         st.subheader("Summary (by Vineyard and Block, all vintages)")
         summary_cols = [col for col in ['Brix', 'pH', 'TA', 'MA'] if col in filtered.columns]
         if summary_cols:
