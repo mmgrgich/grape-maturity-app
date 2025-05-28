@@ -59,7 +59,7 @@ if uploaded_files:
                 parsed_date = pd.to_datetime(date_str, format='%m/%d/%Y', errors='coerce')
             if parsed_date is not None and not pd.isnull(parsed_date):
                 df['Date'] = parsed_date
-                st.success(f"Applied date {parsed_date.strftime('%Y-%m-%d')} from file name to all rows in {file.name}")
+                st.toast(f"Applied date {parsed_date.strftime('%Y-%m-%d')} from file name to all rows in {file.name}", icon="✅")
             else:
                 st.warning(
                     f"File '{file.name}' is missing a 'Date' column and no recognizable date was found in the file name. "
